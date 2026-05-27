@@ -67,10 +67,12 @@ One of the most critical security practices in any application is **validating a
 
 ```typescript
 // Strict regex validation for GitHub usernames
-const USERNAME_REGEX = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38}[a-zA-Z0-9])?$/;
+const githubUsernameRegex =
+  /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
 
-function isValidUsername(username: string): boolean {
-  return USERNAME_REGEX.test(username);
+if (!githubUsernameRegex.test(username)) {
+  console.error("Invalid GitHub username.");
+  process.exit(1);
 }
 ```
 
@@ -93,11 +95,11 @@ const options = {
   hostname: 'api.github.com',
   path: `/users/${username}/events`,
   method: 'GET',
-  headers: {
-    'User-Agent': 'GitHub-User-Activity-App',
-    'Accept': 'application/vnd.github.v3+json',
-    'X-GitHub-Api-Version': '2026-03-10'
-  }
+    headers: {
+      'User-Agent': 'GitHub-User-Activity-App',
+      'Accept': 'application/vnd.github.v3+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    }
 };
 ```
 
@@ -129,24 +131,49 @@ The CLI intelligently handles multiple event types:
 ```typescript
 switch (event.type) {
   case "PushEvent":
-    const commits = event.payload.commits.length || 0;
+    const commits = event.payload.commits?.length || 0;
     console.log(`- Pushed ${commits} commit(s) to ${repoName}`);
     break;
-  
+
   case "IssuesEvent":
-    if (event.payload.action === "opened") {
-      console.log(`- Opened a new issue in ${repoName}`);
-    }
+    const action = event.payload.action;
+    const issueNum = event.payload.issue?.number ? ` #${event.payload.issue.number}` : "";
+    console.log(`- ${action.charAt(0).toUpperCase() + action.slice(1)} an issue${issueNum} in ${repoName}`);
     break;
-  
+
   case "WatchEvent":
     console.log(`- Starred ${repoName}`);
     break;
-  
+
   case "CreateEvent":
-    if (event.payload.ref_type === "repository") {
+    const refType = event.payload.ref_type;
+    if (refType === "repository") {
       console.log(`- Created a new repository: ${repoName}`);
+    } else {
+      console.log(`- Created ${refType} '${event.payload.ref || ""}' in ${repoName}`);
     }
+    break;
+
+  case "DeleteEvent":
+    console.log(`- Deleted ${event.payload.ref_type} '${event.payload.ref || ""}' in ${repoName}`);
+    break;
+
+  case "ForkEvent":
+    console.log(`- Forked ${repoName}`);
+    break;
+
+  case "PullRequestEvent":
+    const prAction = event.payload.action;
+    const prNum = event.payload.pull_request?.number ? ` #${event.payload.pull_request.number}` : "";
+    if (prAction === "closed" && event.payload.pull_request?.merged) {
+      console.log(`- Merged pull request${prNum} in ${repoName}`);
+    } else {
+      console.log(`- ${prAction.charAt(0).toUpperCase() + prAction.slice(1)} pull request${prNum} in ${repoName}`);
+    }
+    break;
+
+  case "IssueCommentEvent":
+    console.log(`- Commented on an issue in ${repoName}`);
     break;
 }
 ```
@@ -160,13 +187,13 @@ switch (event.type) {
 
 #### Real-World Behavior
 
-**PushEvent peculiarity:** The `payload.commits.length` can be `0` even for legitimate pushes due to:
+**PushEvent peculiarity:** The `payload.commits` array can be undefined or contain `0` commits even for legitimate pushes due to:
 - Branch synchronization without new commits
 - Tag creation/deletion operations  
 - Merge operations via the GitHub web UI
 - Force pushes that rewrite history
 
-The implementation safely handles this with `event.payload.commits.length || 0`, ensuring the UI displays "0 commits" instead of crashing or showing undefined values.  
+Accessing `.length` directly on `payload.commits` when it is undefined causes a runtime `TypeError`. The implementation safely handles this using optional chaining (`event.payload.commits?.length || 0`), ensuring the UI displays "0 commit(s)" instead of crashing or raising error values.  
 
 ---
 
